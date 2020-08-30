@@ -1,0 +1,10 @@
+[package]
+name = "rusty_elixir_decimal"
+version = "0.1.0"
+authors = ["Lukasz Samson <lukaszsamson@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bitflags = "^1.2.1"
