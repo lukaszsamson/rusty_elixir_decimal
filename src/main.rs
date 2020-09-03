@@ -362,6 +362,35 @@ impl Context {
     pub fn sub(&mut self, num1: Decimal, num2: Decimal) -> Result<Decimal, Error> {
         self.add(num1, Decimal{sign: -num2.sign, ..num2})
     }
+
+    pub fn compare(&mut self, num1: Decimal, num2: Decimal) -> Result<Decimal, Error> {
+        match (num1, num2) {
+            (Decimal{coef: Coefficient::NaN, sign: _, exp: _}, _) => panic!("Unexpected NaN"),
+            (_, Decimal{coef: Coefficient::NaN, sign: _, exp: _}) => panic!("Unexpected NaN"),
+            (Decimal{coef: Coefficient::SNaN, sign: _, exp: _}, _) => self.handle_error(Signal::INVALID_OPERATION, Some("operation on NaN".to_string()), num1),
+            (_, Decimal{coef: Coefficient::SNaN, sign: _, exp: _}) => self.handle_error(Signal::INVALID_OPERATION, Some("operation on NaN".to_string()), num2),
+            (Decimal{coef: Coefficient::QNaN, sign: _, exp: _}, _) => Ok(num1),
+            (_, Decimal{coef: Coefficient::QNaN, sign: _, exp: _}) => Ok(num2),
+            (Decimal{coef: Coefficient::Inf, sign: sign1, exp: _}, Decimal{coef: Coefficient::Inf, sign: sign2, exp: _}) => {
+                if sign1 == sign2 {
+                    Ok(Decimal{sign: 1, coef: Coefficient::Number(0), exp: 0})
+                } else if sign1 > sign2 {
+                    Ok(Decimal{sign: 1, coef: Coefficient::Number(1), exp: 0})
+                } else {
+                    Ok(Decimal{sign: -1, coef: Coefficient::Number(1), exp: 0})
+                }
+            },
+            (Decimal{coef: Coefficient::Inf, sign, exp: _}, _) => Ok(Decimal{sign: sign, coef: Coefficient::Number(1), exp: 0}),
+            (_, Decimal{coef: Coefficient::Inf, sign, exp: _}) => Ok(Decimal{sign: -sign, coef: Coefficient::Number(1), exp: 0}),
+            (num1, num2) => {
+                match self.sub(num1, num2) {
+                    Ok(Decimal{coef: Coefficient::Number(0), sign: _, exp: _}) => Ok(Decimal{sign: 1, coef: Coefficient::Number(0), exp: 0}),
+                    Ok(Decimal{coef: _, sign, exp: _}) => Ok(Decimal{sign: sign, coef: Coefficient::Number(1), exp: 0}),
+                    error => error
+                }
+            }
+        }
+    }
 }
 
 impl FromStr for Decimal {
@@ -666,5 +695,33 @@ mod tests {
 
         assert_eq!(context.sub(ds("snan"), ds("0")).unwrap_err(), Error::DecimalError(Signal::INVALID_OPERATION, Some("operation on NaN".to_string()), d(1, Coefficient::SNaN, 0)));
         assert_eq!(context.sub(ds("0"), ds("snan")).unwrap_err(), Error::DecimalError(Signal::INVALID_OPERATION, Some("operation on NaN".to_string()), d(-1, Coefficient::SNaN, 0)));
+    }
+
+    #[test]
+    fn test_compare() {
+        let mut context = default_context();
+
+        assert_eq!(context.compare(ds("420"), ds("42e1")).unwrap(), d(1, Coefficient::Number(0), 0));
+        assert_eq!(context.compare(ds("1"), ds("0")).unwrap(), d(1, Coefficient::Number(1), 0));
+        assert_eq!(context.compare(ds("0"), ds("1")).unwrap(), d(-1, Coefficient::Number(1), 0));
+        assert_eq!(context.compare(ds("0"), ds("-0")).unwrap(), d(1, Coefficient::Number(0), 0));
+
+        assert_eq!(context.compare(ds("5"), ds("nan")).unwrap(), d(1, Coefficient::QNaN, 0));
+        assert_eq!(context.compare(ds("nan"), ds("5")).unwrap(), d(1, Coefficient::QNaN, 0));
+
+        assert_eq!(context.compare(ds("-inf"), ds("inf")).unwrap(), d(-1, Coefficient::Number(1), 0));
+        assert_eq!(context.compare(ds("inf"), ds("-inf")).unwrap(), d(1, Coefficient::Number(1), 0));
+        assert_eq!(context.compare(ds("inf"), ds("0")).unwrap(), d(1, Coefficient::Number(1), 0));
+        assert_eq!(context.compare(ds("-inf"), ds("0")).unwrap(), d(-1, Coefficient::Number(1), 0));
+        assert_eq!(context.compare(ds("0"), ds("inf")).unwrap(), d(-1, Coefficient::Number(1), 0));
+        assert_eq!(context.compare(ds("0"), ds("-inf")).unwrap(), d(1, Coefficient::Number(1), 0));
+
+        assert_eq!(context.compare(ds("inf"), ds("inf")).unwrap(), d(1, Coefficient::Number(0), 0));
+        assert_eq!(context.compare(ds("-inf"), ds("-inf")).unwrap(), d(1, Coefficient::Number(0), 0));
+
+        assert_eq!(context.compare(ds("inf"), ds("nan")).unwrap(), d(1, Coefficient::QNaN, 0));
+        assert_eq!(context.compare(ds("nan"), ds("-inf")).unwrap(), d(1, Coefficient::QNaN, 0));
+
+        assert_eq!(context.compare(ds("snan"), ds("0")).unwrap_err(), Error::DecimalError(Signal::INVALID_OPERATION, Some("operation on NaN".to_string()), d(1, Coefficient::SNaN, 0)));
     }
 }
